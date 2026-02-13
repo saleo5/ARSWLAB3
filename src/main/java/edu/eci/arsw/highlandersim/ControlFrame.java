@@ -67,6 +67,7 @@ public final class ControlFrame extends JFrame {
     int health = (Integer) healthSpinner.getValue();
     int damage = (Integer) damageSpinner.getValue();
     String fight = (String) fightMode.getSelectedItem();
+    System.setProperty("fight", fight);
     manager = new ImmortalManager(n, fight, health, damage);
     manager.start();
     output.setText("Simulation started with %d immortals (health=%d, damage=%d, fight=%s)%n"
@@ -76,6 +77,14 @@ public final class ControlFrame extends JFrame {
   private void onPauseAndCheck(ActionEvent e) {
     if (manager == null) return;
     manager.pause();
+    // esperar a que todos los hilos lleguen al punto de pausa
+    int expected = manager.populationSnapshot().size();
+    try {
+      while (manager.controller().getWaitingCount() < expected) {
+        Thread.sleep(10);
+      }
+    } catch (InterruptedException ex) { /* ignorar */ }
+
     List<Immortal> pop = manager.populationSnapshot();
     long sum = 0;
     StringBuilder sb = new StringBuilder();
@@ -84,9 +93,12 @@ public final class ControlFrame extends JFrame {
       sum += h;
       sb.append(String.format("%-14s : %5d%n", im.name(), h));
     }
+    long initial = (long) manager.initialCount() * manager.initialHealth();
     sb.append("--------------------------------\n");
-    sb.append("Total Health: ").append(sum).append('\n');
-    sb.append("Score (fights): ").append(manager.scoreBoard().totalFights()).append('\n');
+    sb.append("Total Health:   ").append(sum).append('\n');
+    sb.append("Initial Total:  ").append(initial).append('\n');
+    sb.append("Alive:          ").append(manager.aliveCount()).append('\n');
+    sb.append("Fights:         ").append(manager.scoreBoard().totalFights()).append('\n');
     output.setText(sb.toString());
   }
 
@@ -95,7 +107,10 @@ public final class ControlFrame extends JFrame {
     manager.resume();
   }
 
-  private void onStop(ActionEvent e) { safeStop(); }
+  private void onStop(ActionEvent e) {
+    safeStop();
+    output.setText("Simulation stopped.\n");
+  }
 
   private void safeStop() {
     if (manager != null) {

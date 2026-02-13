@@ -13,15 +13,18 @@ public final class Immortal implements Runnable {
   private final List<Immortal> population;
   private final ScoreBoard scoreBoard;
   private final PauseController controller;
+  private final String fightMode;
   private volatile boolean running = true;
 
-  public Immortal(String name, int health, int damage, List<Immortal> population, ScoreBoard scoreBoard, PauseController controller) {
+  public Immortal(String name, int health, int damage, List<Immortal> population,
+                  ScoreBoard scoreBoard, PauseController controller, String fightMode) {
     this.name = Objects.requireNonNull(name);
     this.health = health;
     this.damage = damage;
     this.population = Objects.requireNonNull(population);
     this.scoreBoard = Objects.requireNonNull(scoreBoard);
     this.controller = Objects.requireNonNull(controller);
+    this.fightMode = Objects.requireNonNull(fightMode);
   }
 
   public String name() { return name; }
@@ -36,8 +39,7 @@ public final class Immortal implements Runnable {
         if (!running) break;
         var opponent = pickOpponent();
         if (opponent == null) continue;
-        String mode = System.getProperty("fight", "ordered");
-        if ("naive".equalsIgnoreCase(mode)) fightNaive(opponent);
+        if ("naive".equalsIgnoreCase(fightMode)) fightNaive(opponent);
         else fightOrdered(opponent);
         Thread.sleep(2);
       }
@@ -47,35 +49,54 @@ public final class Immortal implements Runnable {
   }
 
   private Immortal pickOpponent() {
-    if (population.size() <= 1) return null;
-    Immortal other;
-    do {
-      other = population.get(ThreadLocalRandom.current().nextInt(population.size()));
-    } while (other == this);
-    return other;
+    try {
+      int size = population.size();
+      if (size <= 1) return null;
+      Immortal other;
+      do {
+        other = population.get(ThreadLocalRandom.current().nextInt(size));
+      } while (other == this);
+      return other;
+    } catch (IndexOutOfBoundsException e) {
+      // puede pasar si otro hilo eliminó un inmortal entre size() y get()
+      return null;
+    }
   }
 
+  // toma los locks en orden arbitrario (puede causar deadlock)
   private void fightNaive(Immortal other) {
     synchronized (this) {
       synchronized (other) {
-        if (this.health <= 0 || other.health <= 0) return;
-        other.health -= this.damage;
-        this.health += this.damage / 2;
-        scoreBoard.recordFight();
+        doFight(other);
       }
     }
   }
 
+  // se ordenan los locks por nombre para evitar deadlock
   private void fightOrdered(Immortal other) {
-    Immortal first = this.name.compareTo(other.name) < 0 ? this : other;
-    Immortal second = this.name.compareTo(other.name) < 0 ? other : this;
+    Immortal first, second;
+    if (this.name.compareTo(other.name) < 0) {
+      first = this;
+      second = other;
+    } else {
+      first = other;
+      second = this;
+    }
     synchronized (first) {
       synchronized (second) {
-        if (this.health <= 0 || other.health <= 0) return;
-        other.health -= this.damage;
-        this.health += this.damage / 2;
-        scoreBoard.recordFight();
+        doFight(other);
       }
+    }
+  }
+
+  private void doFight(Immortal other) {
+    if (this.health <= 0 || other.health <= 0) return;
+    other.health -= this.damage;
+    this.health += this.damage / 2;
+    scoreBoard.recordFight();
+    // si el oponente muere, lo sacamos de la lista
+    if (other.health <= 0) {
+      population.remove(other);
     }
   }
 }
